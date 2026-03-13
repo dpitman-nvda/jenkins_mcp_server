@@ -147,7 +147,7 @@ def get_vscode_settings() -> Dict[str, Any]:
 
 class JenkinsSettings(BaseSettings):
     """Jenkins connection settings."""
-    jenkins_url: str = "http://localhost:8080"
+    url: str = "http://localhost:8080"
     username: Optional[str] = None
     password: Optional[str] = None
     token: Optional[str] = None  # API token can be used instead of password
