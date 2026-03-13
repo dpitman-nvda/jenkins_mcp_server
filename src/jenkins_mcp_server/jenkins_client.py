@@ -65,6 +65,27 @@ class JenkinsClient:
             print(f"Error getting Jenkins jobs: {str(e)}")
             return []
     
+    def get_folder_jobs(self, folder_path: Optional[str] = None) -> List[Dict[str, Any]]:
+        """Get jobs within a specific Jenkins folder."""
+        try:
+            if folder_path:
+                url = f"{self.base_url}/job/{folder_path}/api/json"
+            else:
+                url = f"{self.base_url}/api/json"
+            response = requests.get(url, auth=self.auth, verify=False)
+            response.raise_for_status()
+            return response.json().get('jobs', [])
+        except requests.exceptions.HTTPError as e:
+            if e.response.status_code == 404:
+                raise Exception(
+                    f"Folder '{folder_path}' not found. Use folder notation with /job/ between levels. "
+                    f"Example: 'FolderName/job/SubFolder'. Use list-folder-jobs without a path to see top-level items."
+                )
+            raise
+        except Exception as e:
+            print(f"Error getting folder jobs for {folder_path}: {str(e)}")
+            raise
+
     def get_job_info(self, job_name: str) -> Dict[str, Any]:
         """Get detailed information about a specific job."""
         try:
@@ -73,6 +94,13 @@ class JenkinsClient:
                                  verify=False)
             response.raise_for_status()
             return response.json()
+        except requests.exceptions.HTTPError as e:
+            if e.response.status_code == 404:
+                raise Exception(
+                    f"Job '{job_name}' not found. If this is a nested job, use folder notation: "
+                    f"'FolderName/job/SubFolder/job/JobName'. Use the list-folder-jobs tool to browse available jobs."
+                )
+            raise
         except Exception as e:
             print(f"Error getting job info for {job_name}: {str(e)}")
             raise
@@ -85,6 +113,13 @@ class JenkinsClient:
                                  verify=False)
             response.raise_for_status()
             return response.json()
+        except requests.exceptions.HTTPError as e:
+            if e.response.status_code == 404:
+                raise Exception(
+                    f"Build #{build_number} for job '{job_name}' not found. If this is a nested job, use folder notation: "
+                    f"'FolderName/job/SubFolder/job/JobName'. Use the list-folder-jobs tool to browse available jobs."
+                )
+            raise
         except Exception as e:
             print(f"Error getting build info for {job_name} #{build_number}: {str(e)}")
             raise
@@ -97,6 +132,13 @@ class JenkinsClient:
                                  verify=False)
             response.raise_for_status()
             return response.text
+        except requests.exceptions.HTTPError as e:
+            if e.response.status_code == 404:
+                raise Exception(
+                    f"Console output for build #{build_number} of job '{job_name}' not found. If this is a nested job, use folder notation: "
+                    f"'FolderName/job/SubFolder/job/JobName'. Use the list-folder-jobs tool to browse available jobs."
+                )
+            raise
         except Exception as e:
             print(f"Error getting build console for {job_name} #{build_number}: {str(e)}")
             raise
@@ -116,6 +158,13 @@ class JenkinsClient:
             location = response.headers.get('Location', '')
             queue_id = location.split('/')[-2] if location else None
             return int(queue_id) if queue_id and queue_id.isdigit() else -1
+        except requests.exceptions.HTTPError as e:
+            if e.response.status_code == 404:
+                raise Exception(
+                    f"Job '{job_name}' not found. If this is a nested job, use folder notation: "
+                    f"'FolderName/job/SubFolder/job/JobName'. Use the list-folder-jobs tool to browse available jobs."
+                )
+            raise
         except Exception as e:
             print(f"Error triggering build for {job_name}: {str(e)}")
             raise
@@ -127,6 +176,13 @@ class JenkinsClient:
                                   auth=self.auth,
                                   verify=False)
             response.raise_for_status()
+        except requests.exceptions.HTTPError as e:
+            if e.response.status_code == 404:
+                raise Exception(
+                    f"Build #{build_number} for job '{job_name}' not found. If this is a nested job, use folder notation: "
+                    f"'FolderName/job/SubFolder/job/JobName'. Use the list-folder-jobs tool to browse available jobs."
+                )
+            raise
         except Exception as e:
             print(f"Error stopping build {job_name} #{build_number}: {str(e)}")
             raise
@@ -151,6 +207,12 @@ class JenkinsClient:
                                  verify=False)
             response.raise_for_status()
             return response.json()
+        except requests.exceptions.HTTPError as e:
+            if e.response.status_code == 404:
+                raise Exception(
+                    f"Node '{node_name}' not found. Check the node name and use the list-nodes tool to see available nodes."
+                )
+            raise
         except Exception as e:
             print(f"Error getting node info for {node_name}: {str(e)}")
             raise

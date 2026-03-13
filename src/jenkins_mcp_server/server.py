@@ -249,9 +249,13 @@ async def handle_list_tools() -> list[types.Tool]:
             inputSchema={
                 "type": "object",
                 "properties": {
-                    "job_name": {"type": "string"},
+                    "job_name": {
+                        "type": "string",
+                        "description": "Full job path in Jenkins folder notation. For nested jobs, use /job/ between each folder level. Example: 'LLM/job/main/job/L0_MergeRequest_PR'",
+                    },
                     "parameters": {
                         "type": "object",
+                        "description": "Build parameters as key-value pairs",
                         "additionalProperties": {"type": ["string", "number", "boolean"]},
                     },
                 },
@@ -264,8 +268,14 @@ async def handle_list_tools() -> list[types.Tool]:
             inputSchema={
                 "type": "object",
                 "properties": {
-                    "job_name": {"type": "string"},
-                    "build_number": {"type": "integer"},
+                    "job_name": {
+                        "type": "string",
+                        "description": "Full job path in Jenkins folder notation. For nested jobs, use /job/ between each folder level. Example: 'LLM/job/main/job/L0_MergeRequest_PR'",
+                    },
+                    "build_number": {
+                        "type": "integer",
+                        "description": "Jenkins build number (integer)",
+                    },
                 },
                 "required": ["job_name", "build_number"],
             },
@@ -276,7 +286,10 @@ async def handle_list_tools() -> list[types.Tool]:
             inputSchema={
                 "type": "object",
                 "properties": {
-                    "job_name": {"type": "string"},
+                    "job_name": {
+                        "type": "string",
+                        "description": "Full job path in Jenkins folder notation. For nested jobs, use /job/ between each folder level. Example: 'LLM/job/main/job/L0_MergeRequest_PR'",
+                    },
                 },
                 "required": ["job_name"],
             },
@@ -290,13 +303,32 @@ async def handle_list_tools() -> list[types.Tool]:
             },
         ),
         types.Tool(
+            name="list-folder-jobs",
+            description="List jobs and sub-folders within a Jenkins folder. Use this to discover jobs inside nested folders.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "folder_path": {
+                        "type": "string",
+                        "description": "Folder path in Jenkins notation, e.g. 'LLM/job/main'. Omit to list top-level jobs and folders.",
+                    }
+                },
+            },
+        ),
+        types.Tool(
             name="get-build-info",
             description="Get information about a specific build",
             inputSchema={
                 "type": "object",
                 "properties": {
-                    "job_name": {"type": "string"},
-                    "build_number": {"type": "integer"},
+                    "job_name": {
+                        "type": "string",
+                        "description": "Full job path in Jenkins folder notation. For nested jobs, use /job/ between each folder level. Example: 'LLM/job/main/job/L0_MergeRequest_PR'",
+                    },
+                    "build_number": {
+                        "type": "integer",
+                        "description": "Jenkins build number (integer)",
+                    },
                 },
                 "required": ["job_name", "build_number"],
             },
@@ -307,8 +339,14 @@ async def handle_list_tools() -> list[types.Tool]:
             inputSchema={
                 "type": "object",
                 "properties": {
-                    "job_name": {"type": "string"},
-                    "build_number": {"type": "integer"},
+                    "job_name": {
+                        "type": "string",
+                        "description": "Full job path in Jenkins folder notation. For nested jobs, use /job/ between each folder level. Example: 'LLM/job/main/job/L0_MergeRequest_PR'",
+                    },
+                    "build_number": {
+                        "type": "integer",
+                        "description": "Jenkins build number (integer)",
+                    },
                     "tail_chars": {
                         "type": "integer",
                         "description": "Return only the last N characters of the output (recommended for finding errors/failures).",
@@ -335,7 +373,10 @@ async def handle_list_tools() -> list[types.Tool]:
             inputSchema={
                 "type": "object",
                 "properties": {
-                    "node_name": {"type": "string"},
+                    "node_name": {
+                        "type": "string",
+                        "description": "Name of the Jenkins node/agent",
+                    },
                 },
                 "required": ["node_name"],
             },
@@ -497,6 +538,38 @@ async def handle_call_tool(
                 )
             ]
     
+    elif name == "list-folder-jobs":
+        folder_path = arguments.get("folder_path")
+
+        try:
+            jobs = jenkins_client.get_folder_jobs(folder_path)
+
+            jobs_info = []
+            for job in jobs:
+                job_entry = {
+                    "name": job.get("name"),
+                    "url": job.get("url"),
+                    "class": job.get("_class", ""),
+                }
+                if "color" in job:
+                    job_entry["color"] = job["color"]
+                jobs_info.append(job_entry)
+
+            location = f"folder '{folder_path}'" if folder_path else "top level"
+            return [
+                types.TextContent(
+                    type="text",
+                    text=f"Jobs in {location}:\n\n{json.dumps(jobs_info, indent=2)}"
+                )
+            ]
+        except Exception as e:
+            return [
+                types.TextContent(
+                    type="text",
+                    text=f"Failed to list folder jobs: {str(e)}"
+                )
+            ]
+
     elif name == "get-build-info":
         job_name = arguments.get("job_name")
         build_number = arguments.get("build_number")
