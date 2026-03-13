@@ -303,12 +303,20 @@ async def handle_list_tools() -> list[types.Tool]:
         ),
         types.Tool(
             name="get-build-console",
-            description="Get console output from a build",
+            description="Get console output from a build. Use tail_chars to get the end of the log (most useful for finding errors). Use max_chars to limit total output size.",
             inputSchema={
                 "type": "object",
                 "properties": {
                     "job_name": {"type": "string"},
                     "build_number": {"type": "integer"},
+                    "tail_chars": {
+                        "type": "integer",
+                        "description": "Return only the last N characters of the output (recommended for finding errors/failures).",
+                    },
+                    "max_chars": {
+                        "type": "integer",
+                        "description": "Maximum characters to return from the start of output. Ignored if tail_chars is set.",
+                    },
                 },
                 "required": ["job_name", "build_number"],
             },
@@ -538,18 +546,22 @@ async def handle_call_tool(
     elif name == "get-build-console":
         job_name = arguments.get("job_name")
         build_number = arguments.get("build_number")
-        
+        tail_chars = arguments.get("tail_chars")
+        max_chars = arguments.get("max_chars")
+
         if not job_name or build_number is None:
             raise ValueError("Missing required arguments: job_name and build_number")
-        
+
         try:
             console_output = jenkins_client.get_build_console_output(job_name, build_number)
-            
-            # Limit console output size if needed
-            max_length = 10000
-            if len(console_output) > max_length:
-                console_output = console_output[:max_length] + "\n... (output truncated)"
-            
+
+            if tail_chars is not None:
+                if len(console_output) > tail_chars:
+                    console_output = "(output truncated — showing last chars)\n..." + console_output[-tail_chars:]
+            elif max_chars is not None:
+                if len(console_output) > max_chars:
+                    console_output = console_output[:max_chars] + "\n... (output truncated)"
+
             return [
                 types.TextContent(
                     type="text",
