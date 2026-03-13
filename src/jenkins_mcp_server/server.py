@@ -348,11 +348,11 @@ async def handle_list_tools() -> list[types.Tool]:
                         "description": "Jenkins build number (integer)",
                     },
                     "tail_chars": {
-                        "type": "integer",
+                        "type": ["integer", "null"],
                         "description": "Return only the last N characters of the output (recommended for finding errors/failures).",
                     },
                     "max_chars": {
-                        "type": "integer",
+                        "type": ["integer", "null"],
                         "description": "Maximum characters to return from the start of output. Ignored if tail_chars is set.",
                     },
                 },
