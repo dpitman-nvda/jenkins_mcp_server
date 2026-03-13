@@ -196,7 +196,7 @@ def load_settings(custom_env_path: Optional[str] = None) -> JenkinsSettings:
         print("\nOverriding with VS Code settings...")
         if 'url' in vscode_settings:
             print(f"Using URL from VS Code: {vscode_settings['url']}")
-            jenkins_settings.jenkins_url = vscode_settings['url']
+            jenkins_settings.url = vscode_settings['url']
         if 'username' in vscode_settings:
             print(f"Using username from VS Code: {vscode_settings['username']}")
             jenkins_settings.username = vscode_settings['username']
@@ -214,7 +214,7 @@ jenkins_settings = load_settings()
 
 # Log final configuration
 print(f"\nFinal configuration:")
-print(f"Jenkins server configured: {jenkins_settings.jenkins_url}")
+print(f"Jenkins server configured: {jenkins_settings.url}")
 if jenkins_settings.username:
     print(f"Using authentication for user: {jenkins_settings.username}")
     if jenkins_settings.token:
