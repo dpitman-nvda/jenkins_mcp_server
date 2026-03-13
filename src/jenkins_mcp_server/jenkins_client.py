@@ -18,7 +18,7 @@ class JenkinsClient:
             if jenkins_settings.username and jenkins_settings.token:
                 print(f"Using API token authentication for user {jenkins_settings.username}")
                 self.auth = HTTPBasicAuth(jenkins_settings.username, jenkins_settings.token)
-                self.base_url = jenkins_settings.jenkins_url.rstrip('/')
+                self.base_url = jenkins_settings.url.rstrip('/')
                 
                 # Test connection
                 print("\nTesting connection with direct request...")
@@ -46,7 +46,7 @@ class JenkinsClient:
         except Exception as e:
             print(f"\nError connecting to Jenkins: {str(e)}")
             print("\nPlease check:")
-            print(f"1. Jenkins server is running at {jenkins_settings.jenkins_url}")
+            print(f"1. Jenkins server is running at {jenkins_settings.url}")
             print("2. Your credentials in .env file are correct")
             print("3. You have proper permissions in Jenkins")
             import traceback

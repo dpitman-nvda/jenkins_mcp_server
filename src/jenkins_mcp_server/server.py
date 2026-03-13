@@ -680,7 +680,7 @@ async def main():
     if args.verbose:
         import logging
         logging.basicConfig(level=logging.INFO)
-        print(f"Jenkins MCP Server starting - connecting to {jenkins_settings.jenkins_url}", file=sys.stderr)
+        print(f"Jenkins MCP Server starting - connecting to {jenkins_settings.url}", file=sys.stderr)
     
     # Run the server using stdin/stdout streams
     try:
