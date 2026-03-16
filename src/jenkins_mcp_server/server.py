@@ -1,5 +1,7 @@
 import asyncio
+import html
 import json
+import re
 from typing import Dict, List, Optional, Any, Union
 
 from mcp.server.models import InitializationOptions
@@ -191,16 +193,30 @@ async def handle_get_prompt(
                 )
             
             console_output = jenkins_client.get_build_console_output(job_name, build_number)
-            
-            # Limit console output size if needed
-            max_length = 10000
-            if len(console_output) > max_length:
-                console_output = console_output[:max_length] + "\n... (output truncated)"
-            
+
+            # Use line-based tail instead of character truncation
+            all_lines = console_output.splitlines()
+            total_lines = len(all_lines)
+            tail_count = 200
+            tail_lines = all_lines[-tail_count:]
+            log_text = "\n".join(tail_lines)
+            log_header = f"Last {len(tail_lines)} lines of {total_lines} total"
+
             build_info = jenkins_client.get_build_info(job_name, build_number)
             result = build_info.get('result', 'UNKNOWN')
             duration = build_info.get('duration', 0) / 1000  # Convert ms to seconds
-            
+
+            # Try to include failing stage info for pipeline jobs
+            failing_stages_text = ""
+            try:
+                stages = jenkins_client.get_pipeline_stages(job_name, build_number)
+                failing = [s for s in stages if s.get("status") != "SUCCESS"]
+                if failing:
+                    stage_names = ", ".join(s.get("name", "unknown") for s in failing)
+                    failing_stages_text = f"\nFailing stages: {stage_names}\n"
+            except Exception:
+                pass
+
             return types.GetPromptResult(
                 description=f"Analysis of build #{build_number} for job: {job_name}",
                 messages=[
@@ -210,8 +226,9 @@ async def handle_get_prompt(
                             type="text",
                             text=f"Please analyze the following Jenkins build logs for job '{job_name}' (build #{build_number}).\n\n"
                                  f"Build result: {result}\n"
-                                 f"Build duration: {duration} seconds\n\n"
-                                 f"Console output:\n```\n{console_output}\n```\n\n"
+                                 f"Build duration: {duration} seconds\n"
+                                 f"{failing_stages_text}\n"
+                                 f"Console output ({log_header}):\n```\n{log_text}\n```\n\n"
                                  f"Please identify any issues, errors, or warnings in these logs. "
                                  f"If there are problems, suggest how to fix them. "
                                  f"If the build was successful, summarize what happened.",
@@ -334,8 +351,8 @@ async def handle_list_tools() -> list[types.Tool]:
             },
         ),
         types.Tool(
-            name="get-build-console",
-            description="Get console output from a build. Use tail_chars to get the end of the log (most useful for finding errors). Use max_chars to limit total output size.",
+            name="get-log-tail",
+            description="Get the last N lines of console output from a build. Most useful for quickly finding errors at the end of a build log.",
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -347,16 +364,100 @@ async def handle_list_tools() -> list[types.Tool]:
                         "type": "integer",
                         "description": "Jenkins build number (integer)",
                     },
-                    "tail_chars": {
-                        "type": ["integer", "null"],
-                        "description": "Return only the last N characters of the output (recommended for finding errors/failures).",
-                    },
-                    "max_chars": {
-                        "type": ["integer", "null"],
-                        "description": "Maximum characters to return from the start of output. Ignored if tail_chars is set.",
+                    "lines": {
+                        "type": "integer",
+                        "description": "Number of lines to return from the end of the log (default: 200)",
                     },
                 },
                 "required": ["job_name", "build_number"],
+            },
+        ),
+        types.Tool(
+            name="search-log",
+            description="Search build console output using a regex pattern. Returns matching lines with 3 lines of context before and after each match.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "job_name": {
+                        "type": "string",
+                        "description": "Full job path in Jenkins folder notation. For nested jobs, use /job/ between each folder level. Example: 'LLM/job/main/job/L0_MergeRequest_PR'",
+                    },
+                    "build_number": {
+                        "type": "integer",
+                        "description": "Jenkins build number (integer)",
+                    },
+                    "regex_pattern": {
+                        "type": "string",
+                        "description": "Regular expression pattern to search for in the console output",
+                    },
+                },
+                "required": ["job_name", "build_number", "regex_pattern"],
+            },
+        ),
+        types.Tool(
+            name="get-log-chunk",
+            description="Get a specific range of lines from console output. Useful for examining a known section of a build log. Capped at 500 lines per request.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "job_name": {
+                        "type": "string",
+                        "description": "Full job path in Jenkins folder notation. For nested jobs, use /job/ between each folder level. Example: 'LLM/job/main/job/L0_MergeRequest_PR'",
+                    },
+                    "build_number": {
+                        "type": "integer",
+                        "description": "Jenkins build number (integer)",
+                    },
+                    "start_line": {
+                        "type": "integer",
+                        "description": "Starting line number (1-based)",
+                    },
+                    "end_line": {
+                        "type": "integer",
+                        "description": "Ending line number (inclusive)",
+                    },
+                },
+                "required": ["job_name", "build_number", "start_line", "end_line"],
+            },
+        ),
+        types.Tool(
+            name="get-failing-stages",
+            description="Get pipeline stages that did not succeed. Returns stage names, IDs, status, and duration for non-SUCCESS stages. Only works with Pipeline jobs.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "job_name": {
+                        "type": "string",
+                        "description": "Full job path in Jenkins folder notation. For nested jobs, use /job/ between each folder level. Example: 'LLM/job/main/job/L0_MergeRequest_PR'",
+                    },
+                    "build_number": {
+                        "type": "integer",
+                        "description": "Jenkins build number (integer)",
+                    },
+                },
+                "required": ["job_name", "build_number"],
+            },
+        ),
+        types.Tool(
+            name="get-stage-log",
+            description="Get the log output for a specific pipeline stage. Use get-failing-stages first to find stage IDs. Only works with Pipeline jobs.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "job_name": {
+                        "type": "string",
+                        "description": "Full job path in Jenkins folder notation. For nested jobs, use /job/ between each folder level. Example: 'LLM/job/main/job/L0_MergeRequest_PR'",
+                    },
+                    "build_number": {
+                        "type": "integer",
+                        "description": "Jenkins build number (integer)",
+                    },
+                    "stage_id": {
+                        "type": "string",
+                        "description": "Stage node ID (obtained from get-failing-stages)",
+                    },
+                },
+                "required": ["job_name", "build_number", "stage_id"],
             },
         ),
         types.Tool(
@@ -616,38 +717,187 @@ async def handle_call_tool(
                 )
             ]
     
-    elif name == "get-build-console":
+    elif name == "get-log-tail":
         job_name = arguments.get("job_name")
         build_number = arguments.get("build_number")
-        tail_chars = arguments.get("tail_chars")
-        max_chars = arguments.get("max_chars")
+        num_lines = arguments.get("lines", 200)
 
         if not job_name or build_number is None:
             raise ValueError("Missing required arguments: job_name and build_number")
 
         try:
             console_output = jenkins_client.get_build_console_output(job_name, build_number)
+            if not console_output.strip():
+                return [types.TextContent(type="text", text="Console output is empty.")]
 
-            if tail_chars is not None:
-                if len(console_output) > tail_chars:
-                    console_output = "(output truncated — showing last chars)\n..." + console_output[-tail_chars:]
-            elif max_chars is not None:
-                if len(console_output) > max_chars:
-                    console_output = console_output[:max_chars] + "\n... (output truncated)"
+            all_lines = console_output.splitlines()
+            total = len(all_lines)
+            tail = all_lines[-num_lines:]
+            header = f"(showing last {len(tail)} of {total} lines)\n\n"
 
             return [
                 types.TextContent(
                     type="text",
-                    text=f"Console output for {job_name} #{build_number}:\n\n```\n{console_output}\n```"
+                    text=header + "\n".join(tail)
                 )
             ]
         except Exception as e:
+            return [types.TextContent(type="text", text=f"Failed to get log tail for {job_name} #{build_number}: {str(e)}")]
+
+    elif name == "search-log":
+        job_name = arguments.get("job_name")
+        build_number = arguments.get("build_number")
+        regex_pattern = arguments.get("regex_pattern")
+
+        if not job_name or build_number is None or not regex_pattern:
+            raise ValueError("Missing required arguments: job_name, build_number, and regex_pattern")
+
+        try:
+            pattern = re.compile(regex_pattern)
+        except re.error as e:
+            return [types.TextContent(type="text", text=f"Invalid regex pattern: {e}")]
+
+        try:
+            console_output = jenkins_client.get_build_console_output(job_name, build_number)
+            if not console_output.strip():
+                return [types.TextContent(type="text", text="Console output is empty.")]
+
+            lines = console_output.splitlines()
+            context_radius = 3
+            match_indices = set()
+
+            for i, line in enumerate(lines):
+                if pattern.search(line):
+                    match_indices.add(i)
+
+            if not match_indices:
+                return [types.TextContent(type="text", text=f"No matches found for pattern: {regex_pattern}")]
+
+            # Build context windows and merge overlapping ones
+            windows = []
+            for idx in sorted(match_indices):
+                start = max(0, idx - context_radius)
+                end = min(len(lines) - 1, idx + context_radius)
+                if windows and start <= windows[-1][1] + 1:
+                    windows[-1] = (windows[-1][0], end)
+                else:
+                    windows.append((start, end))
+
+            # Cap at 100 match groups
+            windows = windows[:100]
+
+            result_parts = []
+            for start, end in windows:
+                chunk_lines = []
+                for i in range(start, end + 1):
+                    marker = ">>>" if i in match_indices else "   "
+                    chunk_lines.append(f"{marker} {i + 1:6d} | {lines[i]}")
+                result_parts.append("\n".join(chunk_lines))
+
+            header = f"Found {len(match_indices)} matching line(s) in {len(windows)} group(s):\n\n"
+            return [types.TextContent(type="text", text=header + "\n---\n".join(result_parts))]
+        except Exception as e:
+            return [types.TextContent(type="text", text=f"Failed to search log for {job_name} #{build_number}: {str(e)}")]
+
+    elif name == "get-log-chunk":
+        job_name = arguments.get("job_name")
+        build_number = arguments.get("build_number")
+        start_line = arguments.get("start_line")
+        end_line = arguments.get("end_line")
+
+        if not job_name or build_number is None or start_line is None or end_line is None:
+            raise ValueError("Missing required arguments: job_name, build_number, start_line, and end_line")
+
+        if start_line < 1:
+            return [types.TextContent(type="text", text="start_line must be >= 1")]
+
+        try:
+            console_output = jenkins_client.get_build_console_output(job_name, build_number)
+            if not console_output.strip():
+                return [types.TextContent(type="text", text="Console output is empty.")]
+
+            lines = console_output.splitlines()
+            total = len(lines)
+
+            if start_line > total:
+                return [types.TextContent(type="text", text=f"start_line ({start_line}) exceeds total lines ({total}).")]
+
+            # Cap at 500 lines
+            capped_end = min(end_line, start_line + 499, total)
+
+            chunk = []
+            for i in range(start_line - 1, capped_end):
+                chunk.append(f"{i + 1:6d} | {lines[i]}")
+
+            header = f"Lines {start_line}-{capped_end} of {total}:\n\n"
+            return [types.TextContent(type="text", text=header + "\n".join(chunk))]
+        except Exception as e:
+            return [types.TextContent(type="text", text=f"Failed to get log chunk for {job_name} #{build_number}: {str(e)}")]
+
+    elif name == "get-failing-stages":
+        job_name = arguments.get("job_name")
+        build_number = arguments.get("build_number")
+
+        if not job_name or build_number is None:
+            raise ValueError("Missing required arguments: job_name and build_number")
+
+        try:
+            stages = jenkins_client.get_pipeline_stages(job_name, build_number)
+            failing = [
+                {
+                    "id": s.get("id"),
+                    "name": s.get("name"),
+                    "status": s.get("status"),
+                    "durationMillis": s.get("durationMillis"),
+                }
+                for s in stages
+                if s.get("status") != "SUCCESS"
+            ]
+
+            if not failing:
+                return [types.TextContent(type="text", text="All pipeline stages succeeded.")]
+
             return [
                 types.TextContent(
                     type="text",
-                    text=f"Failed to get console output for {job_name} #{build_number}: {str(e)}"
+                    text=f"Non-successful stages ({len(failing)}):\n\n{json.dumps(failing, indent=2)}"
                 )
             ]
+        except Exception as e:
+            error_msg = str(e)
+            if "not appear to be a Pipeline" in error_msg or "not found" in error_msg:
+                return [types.TextContent(type="text", text=f"This build does not appear to be a Pipeline job. {error_msg}")]
+            return [types.TextContent(type="text", text=f"Failed to get failing stages for {job_name} #{build_number}: {error_msg}")]
+
+    elif name == "get-stage-log":
+        job_name = arguments.get("job_name")
+        build_number = arguments.get("build_number")
+        stage_id = arguments.get("stage_id")
+
+        if not job_name or build_number is None or not stage_id:
+            raise ValueError("Missing required arguments: job_name, build_number, and stage_id")
+
+        try:
+            stage_data = jenkins_client.get_stage_log(job_name, build_number, stage_id)
+            raw_text = stage_data.get("text", "")
+            # Strip HTML tags and unescape entities
+            plain_text = re.sub(r'<[^>]+>', '', raw_text)
+            plain_text = html.unescape(plain_text)
+
+            if not plain_text.strip():
+                return [types.TextContent(type="text", text="Stage log is empty.")]
+
+            return [
+                types.TextContent(
+                    type="text",
+                    text=f"Stage log (node {stage_id}):\n\n{plain_text}"
+                )
+            ]
+        except Exception as e:
+            error_msg = str(e)
+            if "not appear to be a Pipeline" in error_msg or "not found" in error_msg:
+                return [types.TextContent(type="text", text=f"This build does not appear to be a Pipeline job. {error_msg}")]
+            return [types.TextContent(type="text", text=f"Failed to get stage log for {job_name} #{build_number} stage {stage_id}: {error_msg}")]
     
     elif name == "get-queue-info":
         try:

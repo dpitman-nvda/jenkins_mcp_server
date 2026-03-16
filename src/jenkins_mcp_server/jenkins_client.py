@@ -217,6 +217,51 @@ class JenkinsClient:
             print(f"Error getting node info for {node_name}: {str(e)}")
             raise
     
+    def get_pipeline_stages(self, job_name: str, build_number: int) -> List[Dict[str, Any]]:
+        """Get pipeline stages for a build via the Workflow API."""
+        try:
+            response = requests.get(
+                f"{self.base_url}/job/{job_name}/{build_number}/wfapi/describe",
+                auth=self.auth,
+                verify=False,
+            )
+            response.raise_for_status()
+            return response.json().get('stages', [])
+        except requests.exceptions.HTTPError as e:
+            if e.response.status_code == 404:
+                raise Exception(
+                    f"Pipeline data for build #{build_number} of job '{job_name}' not found. "
+                    f"This build may not be a Pipeline job, or the job path may be incorrect."
+                )
+            raise
+        except (ValueError, KeyError):
+            # Non-pipeline jobs may return non-JSON or unexpected format
+            raise Exception(
+                "This build does not appear to be a Pipeline job."
+            )
+
+    def get_stage_log(self, job_name: str, build_number: int, stage_id: str) -> Dict[str, Any]:
+        """Get the log for a specific pipeline stage."""
+        try:
+            response = requests.get(
+                f"{self.base_url}/job/{job_name}/{build_number}/execution/node/{stage_id}/wfapi/log",
+                auth=self.auth,
+                verify=False,
+            )
+            response.raise_for_status()
+            return response.json()
+        except requests.exceptions.HTTPError as e:
+            if e.response.status_code == 404:
+                raise Exception(
+                    f"Stage log for stage '{stage_id}' in build #{build_number} of job '{job_name}' not found. "
+                    f"Check that the stage ID is valid (use get-failing-stages to list stages)."
+                )
+            raise
+        except (ValueError, KeyError):
+            raise Exception(
+                "This build does not appear to be a Pipeline job."
+            )
+
     def get_nodes(self) -> List[Dict[str, str]]:
         """Get a list of all nodes."""
         try:
