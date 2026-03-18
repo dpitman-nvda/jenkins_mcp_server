@@ -174,6 +174,11 @@ class JenkinsSettings(BaseSettings):
         
         super().__init__(**data)
 
+    @property
+    def is_read_only(self) -> bool:
+        """True when credentials are not configured."""
+        return not (self.username and (self.token or self.password))
+
 
 # Function to load settings from all sources
 def load_settings(custom_env_path: Optional[str] = None) -> JenkinsSettings:
@@ -215,11 +220,11 @@ jenkins_settings = load_settings()
 # Log final configuration
 print(f"\nFinal configuration:")
 print(f"Jenkins server configured: {jenkins_settings.url}")
-if jenkins_settings.username:
-    print(f"Using authentication for user: {jenkins_settings.username}")
+if jenkins_settings.is_read_only:
+    print("Mode: READ-ONLY (no credentials configured — trigger-build and stop-build are disabled)")
+else:
+    print(f"Mode: Full access (authenticated as {jenkins_settings.username})")
     if jenkins_settings.token:
         print("Authentication method: API Token")
     elif jenkins_settings.password:
         print("Authentication method: Password")
-else:
-    print("No authentication configured for Jenkins")

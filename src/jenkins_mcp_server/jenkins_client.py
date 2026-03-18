@@ -14,41 +14,48 @@ class JenkinsClient:
             # Disable SSL verification warnings
             import urllib3
             urllib3.disable_warnings()
-            
-            if jenkins_settings.username and jenkins_settings.token:
-                print(f"Using API token authentication for user {jenkins_settings.username}")
-                self.auth = HTTPBasicAuth(jenkins_settings.username, jenkins_settings.token)
-                self.base_url = jenkins_settings.url.rstrip('/')
-                
-                # Test connection
-                print("\nTesting connection with direct request...")
-                response = requests.get(f"{self.base_url}/api/json", 
-                                     auth=self.auth, 
-                                     verify=False)
-                print(f"Direct request status: {response.status_code}")
-                
-                if response.ok:
-                    print("Direct API call successful!")
-                    data = response.json()
-                    print(f"Server version: {data.get('_class', 'unknown')}")
-                    
-                    # Store the initial jobs data
-                    self._jobs = data.get('jobs', [])
-                    print(f"Found {len(self._jobs)} jobs:")
-                    for job in self._jobs:
-                        print(f"- {job['name']} ({job.get('color', 'unknown')})")
-                else:
-                    print(f"Direct API call failed: {response.text}")
-                    raise Exception("Failed to connect to Jenkins")
+
+            self.base_url = jenkins_settings.url.rstrip('/')
+
+            if jenkins_settings.username and (jenkins_settings.token or jenkins_settings.password):
+                secret = jenkins_settings.token or jenkins_settings.password
+                method = "API token" if jenkins_settings.token else "password"
+                print(f"Using {method} authentication for user {jenkins_settings.username}")
+                self.auth = HTTPBasicAuth(jenkins_settings.username, secret)
             else:
-                raise ValueError("Username and token are required")
-            
+                print("No credentials configured — running in read-only mode")
+                self.auth = None
+
+            # Test connection
+            print("\nTesting connection with direct request...")
+            response = requests.get(f"{self.base_url}/api/json",
+                                 auth=self.auth,
+                                 verify=False)
+            print(f"Direct request status: {response.status_code}")
+
+            if response.ok:
+                print("Direct API call successful!")
+                data = response.json()
+                print(f"Server version: {data.get('_class', 'unknown')}")
+
+                # Store the initial jobs data
+                self._jobs = data.get('jobs', [])
+                print(f"Found {len(self._jobs)} jobs:")
+                for job in self._jobs:
+                    print(f"- {job['name']} ({job.get('color', 'unknown')})")
+            else:
+                print(f"Direct API call failed: {response.text}")
+                raise Exception("Failed to connect to Jenkins")
+
         except Exception as e:
             print(f"\nError connecting to Jenkins: {str(e)}")
             print("\nPlease check:")
             print(f"1. Jenkins server is running at {jenkins_settings.url}")
-            print("2. Your credentials in .env file are correct")
-            print("3. You have proper permissions in Jenkins")
+            if self.auth:
+                print("2. Your credentials in .env file are correct")
+                print("3. You have proper permissions in Jenkins")
+            else:
+                print("2. The Jenkins server allows anonymous read access")
             import traceback
             traceback.print_exc()
             raise

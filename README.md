@@ -58,6 +58,7 @@ For manual installation:
       "args": ["--verbose"],
       "env": {
         "JENKINS_URL": "http://your-jenkins-server:8080",
+        // Optional: omit username and token/password for read-only mode
         "JENKINS_USERNAME": "your-username",
         "JENKINS_TOKEN": "your-api-token"
         // Or use JENKINS_PASSWORD instead of JENKINS_TOKEN if using password authentication
@@ -67,7 +68,7 @@ For manual installation:
 }
 ```
 
-3. Configure your authentication method:
+3. Configure your authentication method (optional — omit for read-only mode):
    - **Recommended**: Use API token authentication by setting `JENKINS_TOKEN`
    - Alternatively: Use password authentication by setting `JENKINS_PASSWORD`
 
@@ -97,43 +98,77 @@ The server provides prompts for Jenkins data analysis:
 
 ### Tools
 
-The server implements the following tools for Jenkins operations:
+The server implements 14 tools for Jenkins operations. Tools marked with *(requires auth)* are only available when credentials are configured (see [Read-Only Mode](#read-only-mode)).
 
-1. **trigger-build**: Triggers a Jenkins job build
+1. **trigger-build** *(requires auth)*: Triggers a Jenkins job build
    - Required "job_name" argument to specify which job to build
    - Optional "parameters" object containing job parameters
    - Returns build queue information
 
-2. **stop-build**: Stops a running Jenkins build
-   - Required "job_name" and "build_number" arguments 
+2. **stop-build** *(requires auth)*: Stops a running Jenkins build
+   - Required "job_name" and "build_number" arguments
    - Halts an in-progress build execution
 
 3. **get-job-details**: Gets detailed information about a specific job
    - Required "job_name" argument
    - Returns comprehensive job information including recent builds
-   
+
 4. **list-jobs**: Lists all Jenkins jobs
    - Returns a list of all Jenkins jobs with their statuses
 
-5. **get-build-info**: Gets information about a specific build
+5. **list-folder-jobs**: Lists jobs and sub-folders within a Jenkins folder
+   - Optional "folder_path" argument (omit to list top-level items)
+   - Use this to discover jobs inside nested folders
+
+6. **get-build-info**: Gets information about a specific build
    - Required "job_name" and "build_number" arguments
    - Returns build status, duration, and other details
 
-6. **get-build-console**: Gets console output from a build
+7. **get-log-tail**: Gets the last N lines of console output from a build
    - Required "job_name" and "build_number" arguments
-   - Returns the console log output from a specific build
+   - Optional "lines" argument (default: 200)
+   - Most useful for quickly finding errors at the end of a build log
 
-7. **get-queue-info**: Gets information about the Jenkins build queue
-   - Returns information about pending builds in the queue
+8. **search-log**: Searches build console output using a regex pattern
+   - Required "job_name", "build_number", and "regex_pattern" arguments
+   - Returns matching lines with 3 lines of context before and after each match
 
-8. **get-node-info**: Gets information about a Jenkins node/agent
-   - Required "node_name" argument
-   - Returns node status and configuration details
+9. **get-log-chunk**: Gets a specific range of lines from console output
+   - Required "job_name", "build_number", "start_line", and "end_line" arguments
+   - Capped at 500 lines per request
 
-9. **list-nodes**: Lists all Jenkins nodes/agents
-   - Returns a list of all Jenkins nodes/agents and their statuses
+10. **get-failing-stages**: Gets pipeline stages that did not succeed
+    - Required "job_name" and "build_number" arguments
+    - Returns stage names, IDs, status, and duration for non-SUCCESS stages
+    - Only works with Pipeline jobs
+
+11. **get-stage-log**: Gets the log output for a specific pipeline stage
+    - Required "job_name", "build_number", and "stage_id" arguments
+    - Use get-failing-stages first to find stage IDs
+    - Only works with Pipeline jobs
+
+12. **get-queue-info**: Gets information about the Jenkins build queue
+    - Returns information about pending builds in the queue
+
+13. **get-node-info**: Gets information about a Jenkins node/agent
+    - Required "node_name" argument
+    - Returns node status and configuration details
+
+14. **list-nodes**: Lists all Jenkins nodes/agents
+    - Returns a list of all Jenkins nodes/agents and their statuses
 
 ## Configuration
+
+### Read-Only Mode
+
+Credentials are **optional**. If you omit `JENKINS_USERNAME` and `JENKINS_TOKEN`/`JENKINS_PASSWORD`, the server starts in **read-only mode**:
+
+- Only `JENKINS_URL` is required
+- The 12 read-only tools work normally (job listing, build info, log inspection, etc.)
+- Write tools (`trigger-build` and `stop-build`) are hidden and disabled
+- Your Jenkins server must allow **anonymous read access** for this to work
+
+This is useful for monitoring and log analysis without needing a Jenkins account.
 
 ### Option 1: VS Code Settings (Recommended)
 
@@ -213,6 +248,7 @@ Alternatively, configure your Jenkins connection by setting environment variable
 2. Edit the `.env` file with your Jenkins details:
    ```
    JENKINS_URL=http://your-jenkins-server:8080
+   # Optional: omit username and token/password for read-only mode
    JENKINS_USERNAME=your-username
    JENKINS_PASSWORD=your-password
    # OR use an API token instead of password (recommended)

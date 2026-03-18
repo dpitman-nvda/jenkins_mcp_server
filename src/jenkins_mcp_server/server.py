@@ -15,6 +15,8 @@ from .config import jenkins_settings
 
 server = Server("jenkins-mcp-server")
 
+WRITE_TOOLS = {"trigger-build", "stop-build"}
+
 @server.list_resources()
 async def handle_list_resources() -> list[types.Resource]:
     """
@@ -510,10 +512,13 @@ async def handle_list_tools() -> list[types.Tool]:
         ),
     ]
     
+    if jenkins_settings.is_read_only:
+        tools = [t for t in tools if t.name not in WRITE_TOOLS]
+
     print(f"\nRegistering {len(tools)} Jenkins tools:")
     for tool in tools:
         print(f"- {tool.name}: {tool.description}")
-    
+
     return tools
 
 @server.call_tool()
@@ -525,7 +530,16 @@ async def handle_call_tool(
     """
     if not arguments:
         arguments = {}
-    
+
+    if jenkins_settings.is_read_only and name in WRITE_TOOLS:
+        return [
+            types.TextContent(
+                type="text",
+                text=f"Tool '{name}' is not available in read-only mode. "
+                     "Configure JENKINS_USERNAME and JENKINS_TOKEN to enable write operations."
+            )
+        ]
+
     if name == "trigger-build":
         job_name = arguments.get("job_name")
         parameters = arguments.get("parameters", {})
