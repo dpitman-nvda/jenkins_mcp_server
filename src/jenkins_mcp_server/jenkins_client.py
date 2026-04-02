@@ -240,27 +240,55 @@ class JenkinsClient:
                 "This build does not appear to be a Pipeline job."
             )
 
-    def get_stage_log(self, job_name: str, build_number: int, stage_id: str) -> Dict[str, Any]:
-        """Get the log for a specific pipeline stage."""
+    def get_node_log(self, job_name: str, build_number: int, node_id: str) -> Dict[str, Any]:
+        """Get the log for a specific pipeline flow node."""
         try:
             response = requests.get(
-                f"{self.base_url}/job/{job_name}/{build_number}/execution/node/{stage_id}/wfapi/log",
+                f"{self.base_url}/job/{job_name}/{build_number}/execution/node/{node_id}/wfapi/log",
                 auth=self.auth,
                 verify=False,
+                timeout=30,
             )
             response.raise_for_status()
             return response.json()
         except requests.exceptions.HTTPError as e:
             if e.response.status_code == 404:
                 raise Exception(
-                    f"Stage log for stage '{stage_id}' in build #{build_number} of job '{job_name}' not found. "
-                    f"Check that the stage ID is valid (use get-failing-stages to list stages)."
+                    f"Log for node '{node_id}' in build #{build_number} of job '{job_name}' not found. "
+                    f"Check that the node ID is valid (use get-failing-stages to list stages)."
                 )
             raise
         except (ValueError, KeyError):
             raise Exception(
                 "This build does not appear to be a Pipeline job."
             )
+
+    def get_node_describe(self, job_name: str, build_number: int, node_id: str) -> Dict[str, Any]:
+        """Get the wfapi describe for a specific pipeline flow node, including child stageFlowNodes."""
+        try:
+            response = requests.get(
+                f"{self.base_url}/job/{job_name}/{build_number}/execution/node/{node_id}/wfapi/describe",
+                auth=self.auth,
+                verify=False,
+                timeout=30,
+            )
+            response.raise_for_status()
+            return response.json()
+        except requests.exceptions.HTTPError as e:
+            if e.response.status_code == 404:
+                raise Exception(
+                    f"Node '{node_id}' in build #{build_number} of job '{job_name}' not found."
+                )
+            raise
+        except (ValueError, KeyError):
+            raise Exception(
+                "This build does not appear to be a Pipeline job."
+            )
+
+    # Keep old name as alias for backwards compatibility
+    def get_stage_log(self, job_name: str, build_number: int, stage_id: str) -> Dict[str, Any]:
+        """Get the log for a specific pipeline stage (alias for get_node_log)."""
+        return self.get_node_log(job_name, build_number, stage_id)
 
     def get_nodes(self) -> List[Dict[str, str]]:
         """Get a list of all nodes."""

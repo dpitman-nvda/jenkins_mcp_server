@@ -461,6 +461,24 @@ async def handle_list_tools() -> list[types.Tool]:
             },
         ),
         types.Tool(
+            name="get-pipeline-tree",
+            description="Get the full pipeline stage/step hierarchy for a build. Shows all stages with their child steps, statuses, and durations. Useful for understanding pipeline structure before drilling into specific stage logs.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "job_name": {
+                        "type": "string",
+                        "description": "Full job path in Jenkins folder notation. For nested jobs, use /job/ between each folder level. Example: 'LLM/job/main/job/L0_MergeRequest_PR'",
+                    },
+                    "build_number": {
+                        "type": "integer",
+                        "description": "Jenkins build number (integer)",
+                    },
+                },
+                "required": ["job_name", "build_number"],
+            },
+        ),
+        types.Tool(
             name="get-queue-info",
             description="Get information about the Jenkins build queue",
             inputSchema={
@@ -849,6 +867,14 @@ async def handle_call_tool(
                     "name": s.get("name"),
                     "status": s.get("status"),
                     "durationMillis": s.get("durationMillis"),
+                    "stageFlowNodes": [
+                        {
+                            "id": n.get("id"),
+                            "name": n.get("name"),
+                            "status": n.get("status"),
+                        }
+                        for n in s.get("stageFlowNodes", [])
+                    ],
                 }
                 for s in stages
                 if s.get("status") != "SUCCESS"
@@ -878,27 +904,96 @@ async def handle_call_tool(
             raise ValueError("Missing required arguments: job_name, build_number, and stage_id")
 
         try:
-            stage_data = jenkins_client.get_stage_log(job_name, build_number, stage_id)
+            stage_data = jenkins_client.get_node_log(job_name, build_number, stage_id)
             raw_text = stage_data.get("text", "")
-            # Strip HTML tags and unescape entities
             plain_text = re.sub(r'<[^>]+>', '', raw_text)
             plain_text = html.unescape(plain_text)
 
-            if not plain_text.strip():
-                return [types.TextContent(type="text", text="Stage log is empty.")]
+            if plain_text.strip():
+                return [
+                    types.TextContent(
+                        type="text",
+                        text=f"Stage log (node {stage_id}):\n\n{plain_text}"
+                    )
+                ]
 
-            return [
-                types.TextContent(
-                    type="text",
-                    text=f"Stage log (node {stage_id}):\n\n{plain_text}"
-                )
-            ]
+            # Stage node is a container — descend into child step nodes
+            # Cap at 10 children to avoid blocking the event loop too long
+            try:
+                node_desc = jenkins_client.get_node_describe(job_name, build_number, stage_id)
+                child_nodes = node_desc.get("stageFlowNodes", [])[:10]
+                child_logs = []
+                for child in child_nodes:
+                    child_id = str(child.get("id", ""))
+                    child_name = child.get("name", f"Step {child_id}")
+                    if not child_id:
+                        continue
+                    try:
+                        child_data = jenkins_client.get_node_log(job_name, build_number, child_id)
+                        child_text = re.sub(r'<[^>]+>', '', child_data.get("text", ""))
+                        child_text = html.unescape(child_text).strip()
+                        if child_text:
+                            child_logs.append(f"--- Step {child_id}: {child_name} ---\n{child_text}")
+                    except Exception:
+                        continue
+                if child_logs:
+                    combined = "\n\n".join(child_logs)
+                    return [
+                        types.TextContent(
+                            type="text",
+                            text=f"Stage log (node {stage_id}, {len(child_logs)} child steps):\n\n{combined}"
+                        )
+                    ]
+            except Exception:
+                pass
+
+            return [types.TextContent(type="text", text="Stage log is empty.")]
         except Exception as e:
             error_msg = str(e)
             if "not appear to be a Pipeline" in error_msg or "not found" in error_msg:
                 return [types.TextContent(type="text", text=f"This build does not appear to be a Pipeline job. {error_msg}")]
             return [types.TextContent(type="text", text=f"Failed to get stage log for {job_name} #{build_number} stage {stage_id}: {error_msg}")]
     
+    elif name == "get-pipeline-tree":
+        job_name = arguments.get("job_name")
+        build_number = arguments.get("build_number")
+
+        if not job_name or build_number is None:
+            raise ValueError("Missing required arguments: job_name and build_number")
+
+        try:
+            stages = jenkins_client.get_pipeline_stages(job_name, build_number)
+            tree = []
+            for s in stages:
+                stage_entry = {
+                    "id": s.get("id"),
+                    "name": s.get("name"),
+                    "status": s.get("status"),
+                    "durationMillis": s.get("durationMillis"),
+                    "steps": [
+                        {
+                            "id": n.get("id"),
+                            "name": n.get("name"),
+                            "status": n.get("status"),
+                            "durationMillis": n.get("durationMillis"),
+                        }
+                        for n in s.get("stageFlowNodes", [])
+                    ],
+                }
+                tree.append(stage_entry)
+
+            return [
+                types.TextContent(
+                    type="text",
+                    text=f"Pipeline tree ({len(tree)} stages):\n\n{json.dumps(tree, indent=2)}"
+                )
+            ]
+        except Exception as e:
+            error_msg = str(e)
+            if "not appear to be a Pipeline" in error_msg or "not found" in error_msg:
+                return [types.TextContent(type="text", text=f"This build does not appear to be a Pipeline job. {error_msg}")]
+            return [types.TextContent(type="text", text=f"Failed to get pipeline tree for {job_name} #{build_number}: {error_msg}")]
+
     elif name == "get-queue-info":
         try:
             queue_items = jenkins_client.get_queue_info()
